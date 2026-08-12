@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"net"
 	"net/http"
 	"os"
@@ -20,15 +21,14 @@ type server struct {
 func newServer(store store.Store, port int, cancel context.CancelFunc) *server {
 	mux := http.NewServeMux()
 
-	srv := &http.Server{
-		Addr:    fmt.Sprintf(":%d", port),
-		Handler: mux,
+	s := &server{
+		store:  store,
+		cancel: cancel,
 	}
 
-	s := &server{
-		httpServer: srv,
-		store:      store,
-		cancel:     cancel,
+	s.httpServer = &http.Server{
+		Addr:    fmt.Sprintf(":%d", port),
+		Handler: requestLogger(logger)(mux),
 	}
 
 	mux.HandleFunc("GET /", s.handlerIndex)
@@ -56,6 +56,16 @@ func (s *server) start() error {
 
 func (s *server) shutdown(ctx context.Context) error {
 	return s.httpServer.Shutdown(ctx)
+}
+
+func requestLogger(logger *log.Logger) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			next.ServeHTTP(w, r)
+
+			logger.Printf("Served request: %s %s", r.Method, r.URL.Path)
+		})
+	}
 }
 
 func (s *server) handlerShutdown(w http.ResponseWriter, r *http.Request) {

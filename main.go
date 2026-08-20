@@ -12,6 +12,8 @@ import (
 	"syscall"
 	"time"
 
+	pkgerr "github.com/pkg/errors"
+
 	"boot.dev/linko/internal/store"
 )
 
@@ -38,7 +40,7 @@ func run(ctx context.Context, cancel context.CancelFunc, httpPort int, dataDir s
 			fmt.Fprintf(os.Stderr, "Failed to close logger: %v\n", err)
 		}
 	}()
-	
+
 	st, err := store.New(dataDir, logger)
 	if err != nil {
 		logger.Error(fmt.Sprintf("failed to create store: %v", err))
@@ -76,7 +78,7 @@ func initializeLogger(logFile string) (*slog.Logger, closeFunc, error) {
 		}),
 	}
 	closers := []closeFunc{}
-	
+
 	if logFile != "" {
 		file, err := os.OpenFile(logFile, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0o644)
 		if err != nil {
@@ -110,13 +112,27 @@ func initializeLogger(logFile string) (*slog.Logger, closeFunc, error) {
 	return slog.New(slog.NewMultiHandler(handlers...)), closer, nil
 }
 
+type stackTracer interface {
+	error
+	StackTrace() pkgerr.StackTrace
+}
+
 func replaceAttr(groups []string, a slog.Attr) slog.Attr {
 	if a.Key == "error" {
 		err, ok := a.Value.Any().(error)
 		if !ok {
 			return a
 		}
-		return slog.String("error", fmt.Sprintf("%+v", err))
+
+		if stackErr, ok := errors.AsType[stackTracer](err); ok {
+			return slog.GroupAttrs("error", slog.Attr{
+				Key:   "message",
+				Value: slog.StringValue(stackErr.Error()),
+			}, slog.Attr{
+				Key:   "stack_trace",
+				Value: slog.StringValue(fmt.Sprintf("%+v", stackErr.StackTrace())),
+			})
+		}
 	}
 	return a
 }

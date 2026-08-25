@@ -14,6 +14,7 @@ import (
 
 	pkgerr "github.com/pkg/errors"
 
+	"boot.dev/linko/internal/build"
 	"boot.dev/linko/internal/linkoerr"
 	"boot.dev/linko/internal/store"
 )
@@ -41,6 +42,11 @@ func run(ctx context.Context, cancel context.CancelFunc, httpPort int, dataDir s
 			fmt.Fprintf(os.Stderr, "Failed to close logger: %v\n", err)
 		}
 	}()
+
+	logger = logger.With(
+		slog.String("git_sha", build.GitSHA),
+		slog.String("build_time", build.BuildTime),
+	)
 
 	st, err := store.New(dataDir, logger)
 	if err != nil {

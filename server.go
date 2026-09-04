@@ -10,11 +10,22 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strconv"
 	"time"
 
 	"boot.dev/linko/internal/store"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+)
+
+var httpRequestsTotal = promauto.NewCounterVec(
+	prometheus.CounterOpts{
+		Name: "http_requests_total",
+		Help: "Total number of HTTP requests.",
+	},
+	[]string{"method", "path", "status"},
 )
 
 type server struct {
@@ -35,7 +46,7 @@ func newServer(store store.Store, port int, logger *slog.Logger, cancel context.
 
 	s.httpServer = &http.Server{
 		Addr:    fmt.Sprintf(":%d", port),
-		Handler: requestID()(requestLogger(logger)(mux)),
+		Handler: metricsMiddleware(requestID()(requestLogger(logger)(mux))),
 	}
 
 	mux.Handle("GET /metrics", promhttp.Handler())
@@ -142,6 +153,31 @@ func redactIP(addr string) string {
 		return fmt.Sprintf("%d.%d.%d.x", ip4[0], ip4[1], ip4[2])
 	}
 	return ip.String()
+}
+
+type statusRecorder struct {
+	http.ResponseWriter
+	status int
+}
+
+func (r *statusRecorder) WriteHeader(code int) {
+	r.status = code
+	r.ResponseWriter.WriteHeader(code)
+}
+
+func metricsMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rec := &statusRecorder{
+			ResponseWriter: w,
+			status:         http.StatusOK,
+		}
+
+		next.ServeHTTP(rec, r)
+
+		httpRequestsTotal.
+			WithLabelValues(r.Method, r.URL.Path, strconv.Itoa(rec.status)).
+			Inc()
+	})
 }
 
 func requestLogger(logger *slog.Logger) func(http.Handler) http.Handler {

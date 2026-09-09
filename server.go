@@ -14,11 +14,12 @@ import (
 	"strconv"
 	"time"
 
-	"boot.dev/linko/internal/store"
-
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+
+	"boot.dev/linko/internal/store"
 )
 
 var httpRequestsTotal = promauto.NewCounterVec(
@@ -47,7 +48,7 @@ func newServer(store store.Store, port int, logger *slog.Logger, cancel context.
 
 	s.httpServer = &http.Server{
 		Addr:    fmt.Sprintf(":%d", port),
-		Handler: metricsMiddleware(requestID()(requestLogger(logger)(mux))),
+		Handler: otelhttp.NewHandler(metricsMiddleware(requestID()(requestLogger(logger)(mux))), "http.server"),
 	}
 
 	mux.Handle("GET /metrics", promhttp.Handler())
